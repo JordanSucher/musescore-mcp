@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MuseScore API Test Client</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #log { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; margin-bottom: 10px; font-family: monospace; }
+        button { margin: 5px; padding: 8px; cursor: pointer; }
+        textarea { width: 100%; height: 150px; margin-bottom: 10px; font-family: monospace; }
+        .category { margin-bottom: 15px; border: 1px solid #eee; padding: 10px; border-radius: 5px; }
+        h3 { margin-top: 5px; margin-bottom: 10px; }
+        .category-title { font-weight: bold; margin-bottom: 10px; }
+        #connection-status {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background-color: red;
+            margin-left: 10px;
+        }
+        .connected { background-color: green; }
+        button.primary { background-color: #4CAF50; color: white; }
+        .sequence-button { background-color: #2196F3; color: white; }
+    </style>
+</head>
+<body>
+    <h1>MuseScore API Test Client <span id="connection-status"></span></h1>
+    <div id="log"></div>
+    
+    <div class="category">
+        <div class="category-title">Connection</div>
+        <button onclick="connect()">Connect</button>
+        <button onclick="ping()">Ping</button>
+        <button onclick="undo()">Undo</button>
+    </div>
+    
+    <div class="category">
+        <div class="category-title">Score</div>
+        <button onclick="getScore()">Get Score</button>
+    </div>
+    
+    <div class="category">
+        <div class="category-title">Cursor & Navigation</div>
+        <button onclick="getCursorInfo()">Get Cursor Info</button>
+        <button onclick="goToMeasure()">Go To Measure</button>
+        <button onclick="goToFinalMeasure()">Go To Final Measure</button>
+        <button onclick="goToBeginningOfScore()">Go To Beginning of Score</button>
+        <br>
+        <button onclick="nextElement()">Next Element</button>
+        <button onclick="prevElement()">Previous Element</button>
+        <button onclick="selectCurrentMeasure()">Select Current Measure</button>
+    </div>
+    
+    <div class="category">
+        <div class="category-title">Notes & Measures</div>
+        <button onclick="addNote()">Add Note at Current Position</button>
+        <button onclick="addRest()">Add Rest at Current Position</button>
+        <button onclick="addTuplet()">Add Tuplet</button>
+        <button onclick="insertMeasure()">Insert Measure</button>
+        <button onclick="appendMeasure()">Append Measure</button>
+        <button onclick="deleteSelection()">Delete Selection</button>
+    </div>
+    
+  
+    <div class="category">
+        <div class="category-title">Time & Tempo</div>
+        <button onclick="setTimeSignature()">Set Time Signature</button>
+    </div>
+
+    
+    <h3>Custom Command:</h3>
+    <textarea id="command">{
+  "action": "goToMeasure",
+  "params": {
+    "measure": 2
+  }
+}</textarea>
+    <button onclick="sendCustomCommand()">Send Custom Command</button>
+    
+    <script>
+        let socket = null;
+        const log = document.getElementById('log');
+        const connectionStatus = document.getElementById('connection-status');
+        
+        function addLog(message, isError = false) {
+            const time = new Date().toLocaleTimeString();
+            const color = isError ? 'color: red;' : '';
+            
+            // If the message is JSON, format it nicely
+            if (typeof message === 'string' && (message.startsWith('{') || message.startsWith('['))) {
+                try {
+                    const obj = JSON.parse(message);
+                    message = JSON.stringify(obj, null, 2);
+                } catch (e) {
+                    // Not valid JSON, leave as is
+                }
+            }
+            
+            log.innerHTML += `<div style="${color}"><strong>${time}:</strong> ${message}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        function updateConnectionStatus() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                connectionStatus.classList.add('connected');
+            } else {
+                connectionStatus.classList.remove('connected');
+            }
+        }
+        
+        function connect() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            
+            addLog('Attempting to connect to MuseScore API...');
+            socket = new WebSocket('ws://localhost:8765');
+            
+            socket.onopen = function() {
+                addLog('Connected to MuseScore API Server');
+                updateConnectionStatus();
+            };
+            
+            socket.onmessage = function(event) {
+                addLog(`Received: ${event.data}`);
+            };
+            
+            socket.onclose = function() {
+                addLog('Connection closed');
+                updateConnectionStatus();
+            };
+            
+            socket.onerror = function(error) {
+                addLog(`Error: ${error.message || 'Connection failed'}`, true);
+                updateConnectionStatus();
+            };
+        }
+        
+        function checkConnection() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                addLog('Not connected!', true);
+                return false;
+            }
+            return true;
+        }
+        
+        function sendCommand(action, params = {}) {
+            if (!checkConnection()) return;
+            
+            const command = {
+                action: action,
+                params: params
+            };
+            
+            const commandString = JSON.stringify(command);
+            addLog(`Sending: ${commandString}`);
+            socket.send(commandString);
+        }
+        
+        // Helper function to send a command and wait for response
+        function sendCommandAsync(action, params = {}) {
+            return new Promise((resolve, reject) => {
+                if (!checkConnection()) {
+                    reject(new Error('Not connected'));
+                    return;
+                }
+                
+                const command = {
+                    action: action,
+                    params: params
+                };
+                
+                const commandString = JSON.stringify(command);
+                addLog(`Sending: ${commandString}`);
+                
+                const messageHandler = (event) => {
+                    const response = JSON.parse(event.data);
+                    socket.removeEventListener('message', messageHandler);
+                    resolve(response);
+                };
+                
+                socket.addEventListener('message', messageHandler);
+                socket.send(commandString);
+            });
+        }
+        
+        // Delay helper function
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+        
+        // Connection & Utility Functions
+        function ping() {
+            sendCommand('ping');
+        }
+
+        function undo() {
+            sendCommand('undo');
+        }
+        
+        function goToBeginningOfScore() {
+            sendCommand('goToBeginningOfScore');
+        }
+        
+        // Score Management Functions
+        
+        function getScore() {
+            sendCommand('getScore');
+        }
+        
+        // Cursor & Navigation Functions
+        function getCursorInfo() {
+            sendCommand('getCursorInfo');
+        }
+        
+        function nextElement() {
+            sendCommand('nextElement');
+        }
+        
+        function prevElement() {
+            sendCommand('prevElement');
+        }
+
+        function selectCurrentMeasure() {
+            sendCommand('selectCurrentMeasure');
+        }
+        
+        function insertMeasure() {
+            sendCommand('insertMeasure');
+        }
+        
+        function goToMeasure() {
+            sendCommand('goToMeasure', {
+                measure: 2,
+            });
+        }
+        
+        // Notes & Measures Functions
+        function addNote() {
+            // Adds a note at current cursor position without specifying position
+            sendCommand('addNote', {
+                pitch: 64, // E4
+            });
+        }
+        
+        function addRest() {
+            sendCommand('addRest');
+        }
+        
+        function addTuplet() {
+            sendCommand('addTuplet', {
+                ratio: {
+                    numerator: 3,
+                    denominator: 2
+                }
+            });
+        }
+        
+        function appendMeasure() {
+            sendCommand('appendMeasure', {
+                count: 1
+            });
+        }
+
+        function goToFinalMeasure() {
+            sendCommand('goToFinalMeasure');
+        }
+        
+        function deleteSelection() {
+            sendCommand('deleteSelection', {
+                measure: 1
+            });
+        }
+        
+        
+        // Time & Tempo Functions
+        function setTimeSignature() {
+            sendCommand('setTimeSignature', {
+                numerator: 3,
+                denominator: 4
+            });
+        }
+        
+        
+        // Text & Annotations Functions
+        function addText() {
+            sendCommand('addText', {
+                type: 'title',
+                text: 'My New Score'
+            });
+        }
+        
+        function insertText() {
+            sendCommand('insertText', {
+                staff: 0,
+                measure: 0,
+                position: 0,
+                text: 'mp',
+                textType: 'expression'
+            });
+        }
+        
+      
+        
+        
+        function sendCustomCommand() {
+            if (!checkConnection()) return;
+            
+            const commandText = document.getElementById('command').value;
+            try {
+                const command = JSON.parse(commandText);
+                addLog(`Sending custom command: ${JSON.stringify(command, null, 2)}`);
+                socket.send(commandText);
+            } catch (e) {
+                addLog(`Error parsing JSON: ${e.message}`, true);
+            }
+        }
+        
+        // Check connection status on page load
+        updateConnectionStatus();
+    </script>
+</body>
+</html>
