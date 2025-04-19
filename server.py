@@ -172,8 +172,6 @@ class MuseScoreMCP:
         #         "denominator": denominator
         #     })
 
-        type ValidAction = Literal["getScore","addNote",
-            "addRest","addTuplet","appendMeasure","deleteSelection","getCursorInfo","goToMeasure","nextElement","prevElement","selectCurrentMeasure","processSequence","insertMeasure","goToFinalMeasure","goToBeginningOfScore","setTimeSignature"]
 
         class getScoreAction(TypedDict):
             action: Literal["getScore"]
@@ -260,8 +258,16 @@ class MuseScoreMCP:
             action: Literal["undo"]
             params: Dict[str, Any]
 
+        class nextStaffAction(TypedDict):
+            action: Literal["nextStaff"]
+            params: Dict[str, Any]
+
+        class prevStaffAction(TypedDict):
+            action: Literal["prevStaff"]
+            params: Dict[str, Any]
+
         
-        type ActionSequence = List[getScoreAction | addNoteAction | addRestAction | addTupletAction | appendMeasureAction | deleteSelectionAction | getCursorInfoAction | goToMeasureAction | nextElementAction | prevElementAction | selectCurrentMeasureAction | insertMeasureAction | goToFinalMeasureAction | goToBeginningOfScoreAction | setTimeSignatureAction | undoAction]
+        type ActionSequence = List[getScoreAction | addNoteAction | addRestAction | addTupletAction | appendMeasureAction | deleteSelectionAction | getCursorInfoAction | goToMeasureAction | nextElementAction | prevElementAction | selectCurrentMeasureAction | insertMeasureAction | goToFinalMeasureAction | goToBeginningOfScoreAction | setTimeSignatureAction | undoAction | nextStaffAction | prevStaffAction]
 
         @self.mcp.tool()
         async def processSequence(sequence: ActionSequence):

@@ -50,7 +50,6 @@ The server allows an MCP-connected LLM to:
       }
     }
   }
-
    ```
    
 ## Usage

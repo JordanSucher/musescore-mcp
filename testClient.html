@@ -48,7 +48,11 @@
         <br>
         <button onclick="nextElement()">Next Element</button>
         <button onclick="prevElement()">Previous Element</button>
+        <button onclick="nextStaff()">Next Staff</button>
+        <button onclick="prevStaff()">Previous Staff</button>
         <button onclick="selectCurrentMeasure()">Select Current Measure</button>
+        <button onclick="selectCustomRange()">Select Custom Range</button>
+        <button onclick="syncStateToSelection()">Sync State to Selection</button>
     </div>
     
     <div class="category">
@@ -207,22 +211,59 @@
         function getScore() {
             sendCommand('getScore');
         }
+
+        function syncStateToSelection() {
+            sendCommand('syncStateToSelection');
+        }
         
         // Cursor & Navigation Functions
         function getCursorInfo() {
-            sendCommand('getCursorInfo');
+            sendCommand('getCursorInfo',
+                {
+                    verbose: "false"
+                }
+            );
         }
         
         function nextElement() {
-            sendCommand('nextElement');
+            sendCommand('nextElement', {
+                verbose: "false"
+            });
         }
         
         function prevElement() {
-            sendCommand('prevElement');
+            sendCommand('prevElement', {
+                verbose: "false"
+            });
+        }
+
+        function nextStaff() {
+            sendCommand('nextStaff',
+                {
+                    verbose: "false"
+                }
+            );
+        }
+
+        function prevStaff() {
+            sendCommand('prevStaff',
+                {
+                    verbose: "false"
+                }
+            );
         }
 
         function selectCurrentMeasure() {
             sendCommand('selectCurrentMeasure');
+        }
+
+        function selectCustomRange() {
+            sendCommand('selectCustomRange', {
+                startTick: 480,
+                endTick: 960,
+                startStaff: 1,
+                endStaff: 2
+            });
         }
         
         function insertMeasure() {
@@ -240,11 +281,22 @@
             // Adds a note at current cursor position without specifying position
             sendCommand('addNote', {
                 pitch: 64, // E4
+                duration: {
+                    numerator: 1,
+                    denominator: 4
+                },
+                advanceCursorAfterAction: true
             });
         }
         
         function addRest() {
-            sendCommand('addRest');
+            sendCommand('addRest', {
+                duration: {
+                    numerator: 1,
+                    denominator: 4
+                },
+                advanceCursorAfterAction: true
+            });
         }
         
         function addTuplet() {

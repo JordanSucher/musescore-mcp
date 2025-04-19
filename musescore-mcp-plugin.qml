@@ -12,7 +12,7 @@ MuseScore {
     // Global state to track selection position
     property var selectionState: ({
         startStaff: 0,
-        endStaff: 0,
+        endStaff: 1,
         startTick: 0,
         elements: []
     });
@@ -55,6 +55,8 @@ MuseScore {
             "goToMeasure",
             "nextElement",
             "prevElement",
+            "nextStaff",
+            "prevStaff",
             "selectCurrentMeasure",
             "processSequence",
             "insertMeasure",
@@ -112,8 +114,14 @@ MuseScore {
                 return nextElement(command.params);
             case "prevElement":
                 return prevElement(command.params);
+            case "nextStaff":
+                return nextStaff(command.params);
+            case "prevStaff":
+                return prevStaff(command.params);
             case "selectCurrentMeasure":
                 return selectCurrentMeasure(command.params);
+            case "selectCustomRange":
+                return selectCustomRange(command.params);
             case "insertMeasure":
                 return insertMeasure(command.params);
             case "goToFinalMeasure":
@@ -272,7 +280,7 @@ MuseScore {
 
             selectionState = {
                 startStaff: cursor.staffIdx,
-                endStaff: cursor.staffIdx,
+                endStaff: cursor.staffIdx + 1,
                 startTick: startTick,
                 elements: [processedElement]
             };
@@ -294,6 +302,49 @@ MuseScore {
 
     // Cursor Navigation and Information
 
+    function selectCustomRange(params) {
+        if (!curScore) return { error: "No score open" };
+
+        if (!Object.keys(params).includes("startTick") || !Object.keys(params).includes("endTick") || !Object.keys(params).includes("startStaff") || !Object.keys(params).includes("endStaff")) {
+            return { error: "Missing required parameters" };
+        }
+
+        var duration = params.endTick - params.startTick;
+
+        try {
+            curScore.startCmd();
+
+            var cursor = createCursor({ startTick: params.startTick, startStaff: params.startStaff });
+
+            var processedElement = processElement(cursor.element);
+
+            var args = [params.startTick, params.endTick, params.startStaff, params.endStaff];
+            var success = curScore.selection.selectRange(...args);
+
+            // update selection state
+            selectionState = {
+                startStaff: params.startStaff,
+                endStaff: params.endStaff,
+                startTick: params.startTick,
+                elements: [processedElement],
+                totalDuration: duration
+            };
+
+            curScore.endCmd();
+
+            return {
+                success: success,
+                message: "Selection updated",
+                currentSelection: selectionState
+            };
+        } catch (e) {
+            curScore.endCmd(true); // Rollback on error
+            return {
+                error: e.toString()
+            }
+        }
+    }
+
     function selectCurrentMeasure() {
         if (!curScore) return { error: "No score open" };
 
@@ -301,7 +352,7 @@ MuseScore {
             curScore.startCmd();
 
             // get cursor
-            var cursor = createCursor();
+            var cursor = createCursor({ startTick: selectionState.startTick, startStaff: selectionState.startStaff });
 
             // capture current position
             var currTick = cursor.tick;
@@ -314,19 +365,19 @@ MuseScore {
             // figure out which measure the selection is in
             var measureIdx = scoreSummary.measures.filter(measure => measure.startTick <= currTick).length - 1;
             var measureStartTick = scoreSummary.measures[measureIdx].startTick;
-            var measureElements = scoreSummary.measures[measureIdx].elements;
+            var measureElements = scoreSummary.measures[measureIdx].elements[`staff${currStaff}`];
 
             var totalDuration = measureElements.reduce((a, b) => a + b.durationTicks, 0);
             var measureEndTick = measureStartTick + totalDuration;
 
             // select measure
-            var args = [measureStartTick, measureEndTick, currStaff, currStaff];
+            var args = [measureStartTick, measureEndTick, currStaff, currStaff + 1];
             var success = curScore.selection.selectRange(...args);
 
             // update selection state
             selectionState = {
                 startStaff: currStaff,
-                endStaff: currStaff,
+                endStaff: currStaff + 1,
                 startTick: measureStartTick,
                 elements: measureElements,
                 totalDuration: totalDuration
@@ -343,7 +394,9 @@ MuseScore {
         }
         catch (e) {
             curScore.endCmd(true);
-            return { error: e.toString() };
+            return { error: e.toString(),
+                    measure: measureIdx
+                 };
         }
     }
 
@@ -454,12 +507,16 @@ MuseScore {
             var currSelection = curScore.selection;
             var startSegment = currSelection.startSegment;
             var endSegment = currSelection.endSegment;
+            var startStaff = currSelection.startStaff;
+            var endStaff = currSelection.endStaff;
 
 
             if (startSegment) {
                 // we can move to the start of the selection
                 var cursor = createCursor({
-                    startTick: startSegment.tick});
+                    startTick: startSegment.tick,
+                    startStaff: startStaff    
+                });
 
                 var elements = []
 
@@ -473,8 +530,8 @@ MuseScore {
                 var totalDuration = elements.reduce((a, b) => a + b.durationTicks, 0);
 
                 selectionState = {
-                    startStaff: cursor.staffIdx,
-                    endStaff: cursor.staffIdx,
+                    startStaff: startStaff,
+                    endStaff: endStaff,
                     startTick: startSegment.tick,
                     elements: elements,
                     totalDuration: totalDuration
@@ -485,8 +542,7 @@ MuseScore {
                     currentSelection: selectionState
                 };
             } else {
-                // we can not move to the start of the selection, so just reinit the cursor & selection
-                // initCursorState();
+                // not a range selection, so just select the first element
 
                 var cursor = createCursor();
                 var firstElement = curScore.selection.elements[0];
@@ -534,7 +590,7 @@ MuseScore {
             return { 
                 success: true, 
                 currentSelection: selectionState, 
-                currentScore: getScoreSummary()
+                currentScore: params.verbose == "false" ? null : getScoreSummary()
             };
             
         } catch (e) {
@@ -561,18 +617,18 @@ MuseScore {
             var startTick = measure.startTick;
             
             // Position the cursor
-            var cursor = createCursor({ startTick: startTick });
+            var cursor = createCursor({ startTick: startTick, startStaff: selectionState.startStaff });
             
             // Update the selection to match cursor position
             var element = cursor.element ? processElement(cursor.element) : null;
-            var staffIdx = cursor.staffIdx;
+            var staffIdx = selectionState.startStaff;
             curScore.selection.clear();
-            curScore.selection.selectRange(startTick, startTick + element.durationTicks, staffIdx, staffIdx);
+            curScore.selection.selectRange(startTick, startTick + element.durationTicks, staffIdx, staffIdx + 1);
             
             // Save state
             selectionState = {
                 startStaff: staffIdx,
-                endStaff: staffIdx,
+                endStaff: staffIdx + 1,
                 startTick: startTick,
                 elements: [element],
                 totalDuration: element.durationTicks
@@ -591,7 +647,126 @@ MuseScore {
         }
     }
 
-    // Move to next element with unified feedback
+    // move to next staff
+
+    function prevStaff(params) {
+        if (!curScore) return { error: "No score open" };
+
+        try {
+        
+            // Start command for undo
+            curScore.startCmd();
+
+            // sync state to selection
+            syncStateToSelection();
+
+            // check if at first staff, and if so return failure
+            if (selectionState.startStaff == 0) {
+                return { success: false, message: "Already at first staff" };
+            }
+
+            // otherwise, move to previous staff
+
+            // select current measure
+            selectCurrentMeasure();
+
+            var newStartStaff = selectionState.startStaff - 1
+            var newEndStaff = newStartStaff + 1
+
+            curScore.selection.clear();
+
+            var cursor = createCursor({ startTick: selectionState.startTick, startStaff: newStartStaff });
+
+            var newElement = processElement(cursor.element);
+            var newDuration = newElement.durationTicks;
+            
+            curScore.selection.selectRange(selectionState.startTick, selectionState.startTick + newDuration, newStartStaff, newEndStaff);
+
+            // Save state
+            selectionState = {
+                startStaff: newStartStaff,
+                endStaff: newEndStaff,
+                startTick: selectionState.startTick,
+                elements: [newElement],
+                totalDuration: newDuration
+            }
+
+            curScore.endCmd();
+
+            return {
+                success: true, 
+                currentSelection: selectionState,
+                currentScore: params.verbose == "false" ? null : getScoreSummary()
+            };
+
+        } catch (e) {
+            curScore.endCmd(true); // Rollback on error
+            return {
+                success: false,
+                error: e.toString()
+            }
+        }
+    }
+
+    function nextStaff(params) {
+        if (!curScore) return { error: "No score open" };
+
+        try {
+
+            // Start command for undo
+            curScore.startCmd();
+
+            // sync state to selection
+            syncStateToSelection();
+
+            // check if at last staff, and if so return failure
+            if (selectionState.endStaff == curScore.nstaves) {
+                return { success: false, message: "Already at last staff" };
+            }
+
+            // otherwise, move to next staff
+
+            // select current measure
+            selectCurrentMeasure();
+
+            var newStartStaff = selectionState.endStaff
+            var newEndStaff = newStartStaff + 1
+
+            curScore.selection.clear();
+
+            var cursor = createCursor({ startTick: selectionState.startTick, startStaff: newStartStaff });
+
+            var newElement = processElement(cursor.element);
+            var newDuration = newElement.durationTicks;
+            
+            var args = [selectionState.startTick, selectionState.startTick + newDuration, newStartStaff, newEndStaff];
+            var success = curScore.selection.selectRange(...args);
+
+            curScore.endCmd();
+
+            // Save state
+            selectionState = {
+                startStaff: newStartStaff,
+                endStaff: newEndStaff,
+                startTick: selectionState.startTick,
+                elements: [newElement],
+                totalDuration: newDuration
+            }
+
+
+            return { 
+                    success: success, 
+                    args: args,
+                    currentSelection: selectionState,
+                    currentScore: params.verbose == "false" ? null : getScoreSummary()
+            };
+        } catch (e) {
+            curScore.endCmd(true); // Rollback on error
+            return { error: e.toString() };
+        }
+    }
+
+    // Move to next element
     function nextElement(params) {
         if (!curScore) return { error: "No score open" };
         
@@ -610,7 +785,7 @@ MuseScore {
                 startTick += duration;
             }
             
-            var cursor = createCursor({ startTick: startTick });
+            var cursor = createCursor({ startTick: startTick, startStaff: selectionState.startStaff });
 
             // Move to next element
             var success
@@ -634,12 +809,12 @@ MuseScore {
                     cmd("append-measure");
                 }
 
-                curScore.selection.selectRange(startTick, endTick, staffIdx, staffIdx);
+                curScore.selection.selectRange(startTick, endTick, staffIdx, staffIdx + 1);
 
                 // Update saved state
                 selectionState = {
                     startStaff: staffIdx,
-                    endStaff: staffIdx,
+                    endStaff: staffIdx + 1,
                     startTick: startTick,
                     elements: [processedElement],
                     totalDuration: duration
@@ -653,14 +828,14 @@ MuseScore {
                 return { 
                     success: true, 
                     currentSelection: selectionState,
-                    currentScore: getScoreSummary()
+                    currentScore: params.verbose == "false" ? null : getScoreSummary()
                 };
             } else {
                 return { 
                     message: "End of score reached", 
                     success: false, 
                     currentSelection: selectionState,
-                    currentScore: getScoreSummary()
+                    currentScore: params.verbose == "false" ? null : getScoreSummary()
                 };
             }
         } catch (e) {
@@ -681,7 +856,7 @@ MuseScore {
             // sync state to selection
             syncStateToSelection();
             
-            var cursor = createCursor();   
+            var cursor = createCursor({ startTick: selectionState.startTick, startStaff: selectionState.startStaff });   
 
             var endTick = cursor.tick;         
 
@@ -699,14 +874,14 @@ MuseScore {
                 // Update selection to match new cursor position
                 curScore.selection.clear();
                 var staffIdx = cursor.staffIdx;
-                curScore.selection.selectRange(startTick, endTick, staffIdx, staffIdx);
+                curScore.selection.selectRange(startTick, endTick, staffIdx, staffIdx + 1);
 
                 var processedElement = cursor.element ? processElement(cursor.element) : null;
                 
                 // Update saved state
                 selectionState = {
                     startStaff: staffIdx,
-                    endStaff: staffIdx,
+                    endStaff: staffIdx + 1,
                     startTick: startTick,
                     elements: [processedElement],
                     totalDuration: endTick - startTick
@@ -719,14 +894,14 @@ MuseScore {
                 return { 
                     success: true, 
                     currentSelection: selectionState,
-                    currentScore: getScoreSummary()
+                    currentScore: params.verbose == "false" ? null : getScoreSummary()
                 };
             } else {
                 return { 
                     message: "Beginning of score reached", 
                     success: false, 
                     currentSelection: selectionState, 
-                    currentScore: getScoreSummary()
+                    currentScore: params.verbose == "false" ? null : getScoreSummary()
                 };
             }
         } catch (e) {
@@ -1209,6 +1384,10 @@ MuseScore {
         if (!curScore) return { error: "No score open" };
 
          try {
+
+            // save selectionState to restore 
+            var tempSelectionState = selectionState;
+
             var score = {
                 numMeasures: curScore.nmeasures,
                 measures: [],
@@ -1228,13 +1407,13 @@ MuseScore {
                 
                 if (staff) {
                     score.staves.push({
-                        name: staff.name || ("Staff " + (i + 1)),
+                        name: `staff${i}`,
                         shortName: staff.shortName,
                         visible: !staff.invisible
                     });
                 } else {
                     score.staves.push({
-                        name: "Staff " + (i + 1)
+                        name: `staff${i}`
                     });
                 }
             }
@@ -1255,8 +1434,13 @@ MuseScore {
                     measure: i+1, 
                     startTick: 0,
                     numElements: 0, 
-                    elements: []
+                    elements: {}
                 };
+
+                // add staff params to the elements obj
+                for (var j = 0; j < curScore.nstaves; j++) {
+                    measure.elements[`staff${j}`] = [];
+                }
 
                 // track measure boundaries
                 measure.startTick = cursor.tick;
@@ -1269,37 +1453,45 @@ MuseScore {
                 cursor.nextMeasure();
             }
 
-            // now, reset the cursor and process each element
+            // now, iterate through the staffs and process each measure's elements
 
-            cursor.rewindToTick(0);
+            for (var k = 0; k < curScore.nstaves; k++) {
+                
+                // rewind cursor to beginning of selection
+                cursor.rewind(0);
 
-            while (true) {
-                var staffIdx = cursor.staffIdx;
-                var element = cursor.element;
-            
-                // figure out which measure the element is in
-                var measureIdx = measureBoundaries.filter(tick => tick <= cursor.tick).length - 1;
+                // go to relevant staff
+                cursor.staffIdx = k;
 
-                // process element, add to measure and increment count
-                score.measures[measureIdx].numElements++;
+                // walk through the elements
 
-                var processedElement = processElement(element);
+                while (true) {
+                    var staffIdx = cursor.staffIdx;
+                    var element = cursor.element;
+                
+                    // figure out which measure the element is in
+                    var measureIdx = measureBoundaries.filter(tick => tick <= cursor.tick).length - 1;
 
-                processedElement.startTick = cursor.tick;
+                    // process element, add to measure and increment count
+                    score.measures[measureIdx].numElements++;
 
-                if (processedElement) {
-                    score.measures[measureIdx].elements.push(processedElement);
+                    if (element) {
+                        var processedElement = processElement(element);
+                        processedElement.startTick = cursor.tick;
+                                
+                        score.measures[measureIdx].elements[`staff${staffIdx}`].push(processedElement);
+                    }
+
+                    if (!cursor.next()) break;
                 }
 
-                if (!cursor.next()) break;
             }
-            
+
             // Reset cursor state
-            // initCursorState();
-            cursor.rewindToTick(selectionState.startTick);
+            cursor.staffIdx = tempSelectionState.startStaff;
+            cursor.rewindToTick(tempSelectionState.startTick);
             curScore.selection.select(cursor.element);
     
-
             curScore.endCmd();
 
             return score;
