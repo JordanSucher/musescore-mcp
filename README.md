@@ -11,10 +11,11 @@ The server allows an MCP-connected LLM to:
 - Select and delete
 - Create tuplets
 - Undo a change
+- Move from staff to staff
 
 ## Limitations
 
-- Can not understand multiple staffs or navigate between them
+- Can not understand multiple voices within a staff or navigate between them
 
 ## Requirements
 
