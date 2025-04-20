@@ -1,6 +1,8 @@
 # MuseScore MCP Server
 
-This MCP (Model Context Protocol) server integrates MuseScore with LLM clients like Claude Desktop, enabling music composition and analysis through natural language.
+This MCP (Model Context Protocol) server integrates MuseScore with LLM clients like Claude Desktop, enabling basic music composition through natural language.
+
+Brief demo here: https://www.canva.com/design/DAGlHeR706g/4UcXvK23I1axWOfm6lSSxQ/edit
 
 ## Features
 
